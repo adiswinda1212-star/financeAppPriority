@@ -1,11 +1,8 @@
-streamlit
 pandas
+streamlit
 openpyxl
 plotly
 jinja2
 groq
 matplotlib
 seaborn
-weasyprint
-kaleido
-
