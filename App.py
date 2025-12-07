@@ -12,11 +12,7 @@ import re
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
 client = Groq(api_key=GROQ_API_KEY)
 
-# Pilih model Groq yang AKTIF (2025)
-# - llama-3.3-70b-versatile (lebih pintar)
-# - llama-3.1-8b-instant (lebih cepat, murah)
 GROQ_MODEL = "llama-3.3-70b-versatile"
-
 
 # =========================
 # AI CLASSIFIER (GROQ)
@@ -50,25 +46,20 @@ Kategori:
             max_tokens=5
         )
         raw = resp.choices[0].message.content.strip()
-
-        # Bersihkan jawaban dari karakter aneh / tambahan
         cleaned = re.sub(r"[^a-zA-Z]", "", raw).capitalize()
-
         valid = {"Kewajiban", "Kebutuhan", "Tujuan", "Keinginan"}
         return cleaned if cleaned in valid else "Tidak Terkategori"
-
     except Exception as e:
         print("❌ ERROR Groq:", e)
         return "Tidak Terkategori"
-
 
 # =========================
 # ANALYZE EXCEL
 # =========================
 def analyze_transactions(df: pd.DataFrame) -> pd.DataFrame:
     df = df.rename(columns=str.lower)
+    df['tanggal'] = pd.to_datetime(df['tanggal'], errors='coerce')
 
-    # normalisasi jumlah
     if "jumlah" in df.columns:
         df["jumlah"] = pd.to_numeric(df["jumlah"], errors="coerce").fillna(0)
     elif "debit" in df.columns and "kredit" in df.columns:
@@ -82,11 +73,8 @@ def analyze_transactions(df: pd.DataFrame) -> pd.DataFrame:
     if transaksi_col not in df.columns:
         df[transaksi_col] = ""
 
-    # klasifikasi batch
     df["kategori"] = df[transaksi_col].apply(classify_transaction_groq)
-
-    return df[[transaksi_col, "jumlah", "kategori"]]
-
+    return df[["tanggal", transaksi_col, "jumlah", "kategori"]]
 
 # =========================
 # VISUALIZATION
@@ -102,7 +90,6 @@ def generate_donut_chart(df: pd.DataFrame):
     )
     return fig
 
-
 def generate_ratios(df: pd.DataFrame):
     total = df["jumlah"].abs().sum()
     ratios = {}
@@ -110,7 +97,6 @@ def generate_ratios(df: pd.DataFrame):
         amount = df[df["kategori"] == k]["jumlah"].abs().sum()
         ratios[f"{k}/Total"] = f"{(amount/total*100):.2f}%" if total else "0%"
     return ratios
-
 
 # =========================
 # EXPORT HTML REPORT
@@ -136,7 +122,6 @@ def export_report_as_html(df, ratios):
                 <li><strong>{{ key }}</strong>: {{ value }}</li>
             {% endfor %}
         </ul>
-
         <h2>📄 Transaksi Terklasifikasi</h2>
         <table>
             <thead>
@@ -161,7 +146,6 @@ def export_report_as_html(df, ratios):
     """
     return Template(html_template).render(df=df, ratios=ratios)
 
-
 # =========================
 # STREAMLIT UI
 # =========================
@@ -183,7 +167,7 @@ if uploaded_file:
     st.dataframe(df_analyzed)
 
     st.subheader("📈 Alokasi Pengeluaran (Donut Chart)")
-    st.plotly_chart(generate_donut_chart(df_analyzed), width="stretch")
+    st.plotly_chart(generate_donut_chart(df_analyzed), use_container_width=True)
 
     st.subheader("📊 Rasio Keuangan")
     ratios = generate_ratios(df_analyzed)
@@ -198,3 +182,12 @@ if uploaded_file:
             file_name="laporan_keuangan.html",
             mime="text/html"
         )
+
+    # Tambahan: Grafik Tren Bulanan
+    st.subheader("📊 Grafik Tren Pengeluaran Bulanan")
+    df_analyzed['bulan'] = df_analyzed['tanggal'].dt.to_period('M').astype(str)
+    monthly = df_analyzed.groupby(['bulan', 'kategori'])['jumlah'].sum().reset_index()
+    pivot_df = monthly.pivot(index='bulan', columns='kategori', values='jumlah').fillna(0)
+    st.line_chart(pivot_df)
+else:
+    st.info("Silakan unggah file Excel terlebih dahulu.")
