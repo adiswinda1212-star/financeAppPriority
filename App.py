@@ -174,7 +174,9 @@ if uploaded_file:
     st.plotly_chart(generate_donut_chart(df_analyzed), use_container_width=True)
 
     st.markdown("### 📊 Rasio Keuangan Interaktif")
-    total = summary['Jumlah'].sum()
+    for kategori in ["Kewajiban", "Kebutuhan", "Tujuan", "Keinginan"]:
+    jumlah = df[df["kategori"] == kategori]["jumlah"].abs().sum()
+    st.metric(label=f"{kategori}", value=f"Rp{jumlah:,.0f}")
     for i, row in summary.iterrows():
         kategori = row['Kategori']
         nilai = row['Jumlah']
