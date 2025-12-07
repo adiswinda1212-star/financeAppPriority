@@ -1,5 +1,5 @@
-pandas
 streamlit
+pandas
 openpyxl
 plotly
 jinja2
@@ -7,3 +7,4 @@ groq
 matplotlib
 seaborn
 weasyprint
+
