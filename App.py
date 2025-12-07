@@ -2,71 +2,119 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from jinja2 import Template
-from openai import OpenAI
+from groq import Groq
 import os
+import re
 
-# === SETUP GROQ CLIENT ===
-client = OpenAI(
-    api_key=st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY")),
-    base_url="https://api.groq.com/openai/v1"
-)
+# =========================
+# SETUP GROQ CLIENT
+# =========================
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
+client = Groq(api_key=GROQ_API_KEY)
 
-# === FUNGSIONALITAS AI ===
-def classify_transaction_groq(text):
+# Pilih model Groq yang AKTIF (2025)
+# - llama-3.3-70b-versatile (lebih pintar)
+# - llama-3.1-8b-instant (lebih cepat, murah)
+GROQ_MODEL = "llama-3.3-70b-versatile"
+
+
+# =========================
+# AI CLASSIFIER (GROQ)
+# =========================
+def classify_transaction_groq(text: str) -> str:
+    text = str(text).strip()
+    if not text:
+        return "Tidak Terkategori"
+
     prompt = f"""
-Tugas kamu adalah mengklasifikasikan transaksi berikut ke dalam salah satu dari 4 kategori:
-- Kewajiban
-- Kebutuhan
-- Tujuan
-- Keinginan
+Kamu adalah mesin klasifikasi transaksi keuangan.
+Klasifikasikan transaksi berikut ke SALAH SATU kategori:
+1) Kewajiban
+2) Kebutuhan
+3) Tujuan
+4) Keinginan
 
-Jawaban hanya satu kata. Contoh: Kebutuhan
+Aturan:
+- Jawab hanya dengan 1 kata kategori di atas.
+- Tanpa titik, tanpa penjelasan, tanpa tambahan kata lain.
 
 Transaksi: "{text}"
-Jawaban:"""
+Kategori:
+"""
+
     try:
-        response = client.chat.completions.create(
-            model="mixtral-8x7b-32768",
+        resp = client.chat.completions.create(
+            model=GROQ_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
-            max_tokens=10
+            max_tokens=5
         )
-        result = response.choices[0].message.content.strip().capitalize()
-        if result in ["Kewajiban", "Kebutuhan", "Tujuan", "Keinginan"]:
-            return result
-        else:
-            return "Tidak Terkategori"
+        raw = resp.choices[0].message.content.strip()
+
+        # Bersihkan jawaban dari karakter aneh / tambahan
+        cleaned = re.sub(r"[^a-zA-Z]", "", raw).capitalize()
+
+        valid = {"Kewajiban", "Kebutuhan", "Tujuan", "Keinginan"}
+        return cleaned if cleaned in valid else "Tidak Terkategori"
+
     except Exception as e:
         print("❌ ERROR Groq:", e)
         return "Tidak Terkategori"
 
-# === PROSES EXCEL ===
-def analyze_transactions(df):
+
+# =========================
+# ANALYZE EXCEL
+# =========================
+def analyze_transactions(df: pd.DataFrame) -> pd.DataFrame:
     df = df.rename(columns=str.lower)
-    if 'jumlah' in df.columns:
-        df['jumlah'] = df['jumlah'].astype(float)
-    elif 'debit' in df.columns and 'kredit' in df.columns:
-        df['jumlah'] = df['debit'].fillna(0) - df['kredit'].fillna(0)
 
-    transaksi_col = 'transaksi' if 'transaksi' in df.columns else 'deskripsi'
-    df['kategori'] = df[transaksi_col].apply(classify_transaction_groq)
-    return df[[transaksi_col, 'jumlah', 'kategori']]
+    # normalisasi jumlah
+    if "jumlah" in df.columns:
+        df["jumlah"] = pd.to_numeric(df["jumlah"], errors="coerce").fillna(0)
+    elif "debit" in df.columns and "kredit" in df.columns:
+        df["debit"] = pd.to_numeric(df["debit"], errors="coerce").fillna(0)
+        df["kredit"] = pd.to_numeric(df["kredit"], errors="coerce").fillna(0)
+        df["jumlah"] = df["debit"] - df["kredit"]
+    else:
+        df["jumlah"] = 0
 
-# === CHART ===
-def generate_donut_chart(df):
-    summary = df.groupby('kategori')['jumlah'].sum().abs().reset_index()
-    fig = px.pie(summary, names='kategori', values='jumlah', hole=0.4, title="Distribusi T-K-K-K")
+    transaksi_col = "transaksi" if "transaksi" in df.columns else "deskripsi"
+    if transaksi_col not in df.columns:
+        df[transaksi_col] = ""
+
+    # klasifikasi batch
+    df["kategori"] = df[transaksi_col].apply(classify_transaction_groq)
+
+    return df[[transaksi_col, "jumlah", "kategori"]]
+
+
+# =========================
+# VISUALIZATION
+# =========================
+def generate_donut_chart(df: pd.DataFrame):
+    summary = df.groupby("kategori")["jumlah"].sum().abs().reset_index()
+    fig = px.pie(
+        summary,
+        names="kategori",
+        values="jumlah",
+        hole=0.4,
+        title="Distribusi T-K-K-K"
+    )
     return fig
 
-def generate_ratios(df):
-    total = df['jumlah'].abs().sum()
+
+def generate_ratios(df: pd.DataFrame):
+    total = df["jumlah"].abs().sum()
     ratios = {}
-    for kategori in ['Kewajiban', 'Kebutuhan', 'Tujuan', 'Keinginan']:
-        amount = df[df['kategori'] == kategori]['jumlah'].abs().sum()
-        ratios[f"{kategori}/Total"] = f"{(amount/total*100):.2f}%" if total else "0%"
+    for k in ["Kewajiban", "Kebutuhan", "Tujuan", "Keinginan"]:
+        amount = df[df["kategori"] == k]["jumlah"].abs().sum()
+        ratios[f"{k}/Total"] = f"{(amount/total*100):.2f}%" if total else "0%"
     return ratios
 
-# === EXPORT HTML ===
+
+# =========================
+# EXPORT HTML REPORT
+# =========================
 def export_report_as_html(df, ratios):
     html_template = """
     <html>
@@ -88,6 +136,7 @@ def export_report_as_html(df, ratios):
                 <li><strong>{{ key }}</strong>: {{ value }}</li>
             {% endfor %}
         </ul>
+
         <h2>📄 Transaksi Terklasifikasi</h2>
         <table>
             <thead>
@@ -112,7 +161,10 @@ def export_report_as_html(df, ratios):
     """
     return Template(html_template).render(df=df, ratios=ratios)
 
-# === STREAMLIT UI ===
+
+# =========================
+# STREAMLIT UI
+# =========================
 st.set_page_config(page_title="Prioritas Keuangan", layout="wide")
 st.title("📊 Aplikasi Prioritas Keuangan - T-K-K-K")
 
@@ -120,17 +172,18 @@ uploaded_file = st.file_uploader("📤 Unggah File Excel Laporan Bank", type=["x
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
+
     st.subheader("🧾 Data Mentah")
     st.dataframe(df.head())
 
-    st.info("🔍 Menganalisis dan mengklasifikasikan transaksi dengan AI...")
+    st.info("🔍 Menganalisis & mengklasifikasikan transaksi dengan Groq AI...")
     df_analyzed = analyze_transactions(df)
 
     st.subheader("📌 Hasil Klasifikasi T-K-K-K")
     st.dataframe(df_analyzed)
 
     st.subheader("📈 Alokasi Pengeluaran (Donut Chart)")
-    st.plotly_chart(generate_donut_chart(df_analyzed), use_container_width=True)
+    st.plotly_chart(generate_donut_chart(df_analyzed), width="stretch")
 
     st.subheader("📊 Rasio Keuangan")
     ratios = generate_ratios(df_analyzed)
@@ -139,4 +192,9 @@ if uploaded_file:
     st.subheader("📄 Ekspor Laporan")
     if st.button("🔽 Generate Laporan HTML"):
         html_report = export_report_as_html(df_analyzed, ratios)
-        st.download_button("📥 Unduh Laporan HTML", data=html_report, file_name="laporan_keuangan.html", mime="text/html")
+        st.download_button(
+            "📥 Unduh Laporan HTML",
+            data=html_report,
+            file_name="laporan_keuangan.html",
+            mime="text/html"
+        )
