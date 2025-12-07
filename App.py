@@ -1,59 +1,63 @@
 import streamlit as st
 import pandas as pd
-import openai
 import plotly.express as px
 from jinja2 import Template
+from openai import OpenAI
 import os
 
-from openai import OpenAI
+# === SETUP GROQ CLIENT ===
+client = OpenAI(
+    api_key=st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY")),
+    base_url="https://api.groq.com/openai/v1"
+)
 
-openai.api_key = st.secrets.get("GROQ_API_KEY")
-openai.api_base = "https://api.groq.com/openai/v1"
-
+# === FUNGSIONALITAS AI ===
 def classify_transaction_groq(text):
     prompt = f"""
-Klasifikasikan transaksi berikut ke salah satu kategori berikut ini: Kewajiban, Kebutuhan, Tujuan, Keinginan.
+Tugas kamu adalah mengklasifikasikan transaksi berikut ke dalam salah satu dari 4 kategori:
+- Kewajiban
+- Kebutuhan
+- Tujuan
+- Keinginan
 
-Jawaban hanya 1 kata.
+Jawaban hanya satu kata. Contoh: Kebutuhan
 
 Transaksi: "{text}"
-Jawaban:
-"""
+Jawaban:"""
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="mixtral-8x7b-32768",
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=10
         )
-        result = response.choices[0].message.content.strip()
-        print(f"🔍 Transaksi: {text} → AI: {result}")
-        if result.lower() in ['kewajiban', 'kebutuhan', 'tujuan', 'keinginan']:
-            return result.capitalize()
-        return "Tidak Terkategori"
+        result = response.choices[0].message.content.strip().capitalize()
+        if result in ["Kewajiban", "Kebutuhan", "Tujuan", "Keinginan"]:
+            return result
+        else:
+            return "Tidak Terkategori"
     except Exception as e:
         print("❌ ERROR Groq:", e)
         return "Tidak Terkategori"
 
-
-# === ANALISA EXCEL ===
+# === PROSES EXCEL ===
 def analyze_transactions(df):
     df = df.rename(columns=str.lower)
     if 'jumlah' in df.columns:
         df['jumlah'] = df['jumlah'].astype(float)
     elif 'debit' in df.columns and 'kredit' in df.columns:
         df['jumlah'] = df['debit'].fillna(0) - df['kredit'].fillna(0)
+
     transaksi_col = 'transaksi' if 'transaksi' in df.columns else 'deskripsi'
     df['kategori'] = df[transaksi_col].apply(classify_transaction_groq)
     return df[[transaksi_col, 'jumlah', 'kategori']]
 
-# === DONUT CHART ===
+# === CHART ===
 def generate_donut_chart(df):
     summary = df.groupby('kategori')['jumlah'].sum().abs().reset_index()
     fig = px.pie(summary, names='kategori', values='jumlah', hole=0.4, title="Distribusi T-K-K-K")
     return fig
 
-# === RASIO KEUANGAN ===
 def generate_ratios(df):
     total = df['jumlah'].abs().sum()
     ratios = {}
@@ -108,7 +112,7 @@ def export_report_as_html(df, ratios):
     """
     return Template(html_template).render(df=df, ratios=ratios)
 
-# === UI STREAMLIT ===
+# === STREAMLIT UI ===
 st.set_page_config(page_title="Prioritas Keuangan", layout="wide")
 st.title("📊 Aplikasi Prioritas Keuangan - T-K-K-K")
 
