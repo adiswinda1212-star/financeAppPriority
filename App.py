@@ -7,8 +7,6 @@ import os
 import re
 import matplotlib.pyplot as plt
 import seaborn as sns
-import io
-from weasyprint import HTML
 
 # =========================
 # SETUP GROQ CLIENT
@@ -85,36 +83,74 @@ def analyze_transactions(df: pd.DataFrame) -> pd.DataFrame:
     return df[["tanggal", transaksi_col, "jumlah", "kategori"]]
 
 # =========================
-# PDF EXPORT
+# VISUALIZATION
 # =========================
-def export_pdf_report(df: pd.DataFrame, donut_fig, line_fig, rasio_html: str):
-    donut_path = "/tmp/donut.png"
-    line_path = "/tmp/trend.png"
-    donut_fig.write_image(donut_path)
-    line_fig.write_image(line_path)
+def generate_donut_chart(df: pd.DataFrame):
+    summary = df.groupby("kategori")["jumlah"].sum().abs().reset_index()
+    fig = px.pie(
+        summary,
+        names="kategori",
+        values="jumlah",
+        hole=0.4,
+        title="Distribusi T-K-K-K"
+    )
+    return fig
 
-    html_template = f"""
+def generate_ratios(df: pd.DataFrame):
+    total = df["jumlah"].abs().sum()
+    ratios = {}
+    for k in ["Kewajiban", "Kebutuhan", "Tujuan", "Keinginan"]:
+        amount = df[df["kategori"] == k]["jumlah"].abs().sum()
+        ratios[f"{k}/Total"] = f"{(amount/total*100):.2f}%" if total else "0%"
+    return ratios
+
+# =========================
+# EXPORT HTML REPORT
+# =========================
+def export_report_as_html(df, ratios):
+    html_template = """
     <html>
     <head>
         <style>
-            body {{ font-family: Arial; padding: 30px; }}
-            h1 {{ color: #2c3e50; }}
-            img {{ max-width: 100%; }}
+            body { font-family: Arial; padding: 20px; }
+            h1 { color: #2c3e50; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+            th { background-color: #f4f4f4; }
+            ul { line-height: 1.6; }
         </style>
     </head>
     <body>
-        <h1>Laporan Keuangan</h1>
-        <h2>📊 Rasio Keuangan</h2>
-        {rasio_html}
-        <h2>📈 Donut Chart</h2>
-        <img src="{donut_path}" />
-        <h2>📉 Grafik Tren Bulanan</h2>
-        <img src="{line_path}" />
+        <h1>Laporan Keuangan - PRIORITAS</h1>
+        <h2>📊 Rasio T-K-K-K</h2>
+        <ul>
+            {% for key, value in ratios.items() %}
+                <li><strong>{{ key }}</strong>: {{ value }}</li>
+            {% endfor %}
+        </ul>
+        <h2>📄 Transaksi Terklasifikasi</h2>
+        <table>
+            <thead>
+                <tr>
+                    {% for col in df.columns %}
+                        <th>{{ col }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in df.itertuples(index=False) %}
+                    <tr>
+                        {% for cell in row %}
+                            <td>{{ cell }}</td>
+                        {% endfor %}
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </body>
     </html>
     """
-    pdf_bytes = HTML(string=html_template).write_pdf()
-    return pdf_bytes
+    return Template(html_template).render(df=df, ratios=ratios)
 
 # =========================
 # STREAMLIT UI
@@ -126,6 +162,7 @@ uploaded_file = st.file_uploader("📤 Unggah File Excel Laporan Bank", type=["x
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
+
     st.subheader("🧾 Data Mentah")
     st.dataframe(df.head())
 
@@ -135,28 +172,64 @@ if uploaded_file:
     st.subheader("📌 Hasil Klasifikasi T-K-K-K")
     st.dataframe(df_analyzed)
 
-    donut_fig = generate_donut_chart(df_analyzed)
     st.subheader("📈 Alokasi Pengeluaran (Donut Chart)")
-    st.plotly_chart(donut_fig, use_container_width=True)
+    st.plotly_chart(generate_donut_chart(df_analyzed), use_container_width=True)
+
+    st.markdown("### 📊 Rasio Keuangan Interaktif (Dengan Penjelasan)")
+
+    kategori_list = ["Kewajiban", "Kebutuhan", "Tujuan", "Keinginan"]
+    total = df_analyzed["jumlah"].abs().sum()
+
+    nilai = {}
+    rasio = {}
+    for k in kategori_list:
+        amt = df_analyzed[df_analyzed["kategori"] == k]["jumlah"].abs().sum()
+        nilai[k] = amt
+        rasio[k] = (amt / total * 100) if total else 0
+
+    for i, k in enumerate(kategori_list):
+        pct = rasio[k]
+        amt = nilai[k]
+
+        with st.expander(f"📌 {k} — {pct:.2f}%"):
+            st.write(
+                f"**{k} / Total** = Rp{amt:,.0f} / Rp{total:,.0f} = **{pct:.2f}%**"
+            )
+            fig_ratio, ax_ratio = plt.subplots(figsize=(5, 0.6))
+            ax_ratio.barh([""], [pct], color=sns.color_palette("husl", 8)[i])
+            ax_ratio.set_xlim(0, 100)
+            ax_ratio.set_title(f"Proporsi {k}", fontsize=9)
+            ax_ratio.axis("off")
+            st.pyplot(fig_ratio)
+
+            if k == "Kewajiban":
+                st.info("📌 **Makna:** seberapa besar beban cicilan/utang terhadap arus uang.\n\n✅ Idealnya <30%. " + ("⚠️ Terlalu tinggi." if pct > 30 else "✅ Masih sehat."))
+            elif k == "Kebutuhan":
+                st.info("📌 **Makna:** kebutuhan pokok rutin.\n\n✅ Ideal 40–50%. " + ("⚠️ Terlalu tinggi." if pct > 50 else "✅ Ideal."))
+            elif k == "Tujuan":
+                st.info("📌 **Makna:** tabungan/investasi masa depan.\n\n✅ Ideal >10–20%. " + ("⚠️ Terlalu kecil." if pct < 10 else "✅ Konsisten."))
+            elif k == "Keinginan":
+                st.info("📌 **Makna:** gaya hidup, hiburan.\n\n✅ Ideal <30–40%. " + ("⚠️ Terlalu besar." if pct > 40 else "✅ Aman."))
+
+    st.markdown("#### 📌 Ringkasan Rasio")
+    ratios_dict = {f"{k}/Total": f"{rasio[k]:.2f}%" for k in kategori_list}
+    st.json(ratios_dict)
 
     st.subheader("📊 Grafik Tren Pengeluaran Bulanan")
     if 'tanggal' in df_analyzed.columns and not df_analyzed['tanggal'].isna().all():
         df_analyzed['bulan'] = df_analyzed['tanggal'].dt.to_period('M').astype(str)
         monthly = df_analyzed.groupby(['bulan', 'kategori'])['jumlah'].sum().reset_index()
         pivot_df = monthly.pivot(index='bulan', columns='kategori', values='jumlah').fillna(0)
-        trend_fig = px.line(pivot_df, title="Tren Pengeluaran per Kategori")
-        st.plotly_chart(trend_fig, use_container_width=True)
+        st.line_chart(pivot_df)
     else:
-        trend_fig = px.line(title="(Data tidak tersedia)")
         st.warning("📅 Kolom 'Tanggal' tidak tersedia atau tidak valid, grafik tren tidak ditampilkan.")
 
-    # Rasio ringkas untuk HTML
-    rasio_dict = generate_ratios(df_analyzed)
-    rasio_html = "<ul>" + "".join([f"<li><strong>{k}</strong>: {v}</li>" for k, v in rasio_dict.items()]) + "</ul>"
+    st.subheader("📄 Ekspor Laporan")
+    if st.button("📥 Download HTML Laporan"):
+        html = export_report_as_html(df_analyzed, ratios_dict)
+        st.download_button("📄 Unduh Laporan HTML", html, file_name="laporan_keuangan.html")
 
-    st.subheader("📤 Ekspor Laporan PDF")
-    if st.button("📥 Unduh PDF"):
-        pdf_data = export_pdf_report(df_analyzed, donut_fig, trend_fig, rasio_html)
-        st.download_button("📄 Download Laporan PDF", pdf_data, file_name="laporan_keuangan.pdf", mime="application/pdf")
+    st.warning("WeasyPrint tidak tersedia di server ini. Silakan unduh HTML lalu tekan **Ctrl+P → Save as PDF** di browser kamu.")
+
 else:
     st.info("Silakan unggah file Excel terlebih dahulu.")
