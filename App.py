@@ -7,6 +7,7 @@ import os
 import re
 import matplotlib.pyplot as plt
 import seaborn as sns
+from functools import lru_cache
 
 # =========================
 # SETUP GROQ CLIENT
@@ -17,10 +18,11 @@ client = Groq(api_key=GROQ_API_KEY)
 GROQ_MODEL = "llama-3.3-70b-versatile"
 
 # =========================
-# AI CLASSIFIER (GROQ)
+# AI CLASSIFIER (GROQ + FALLBACK)
 # =========================
+@lru_cache(maxsize=1000)
 def classify_transaction_groq(text: str) -> str:
-    text = str(text).strip()
+    text = str(text).strip().lower()
     if not text:
         return "Tidak Terkategori"
 
@@ -48,12 +50,32 @@ Kategori:
             max_tokens=5
         )
         raw = resp.choices[0].message.content.strip()
+
+        # bersihkan dari simbol/angka dll
         cleaned = re.sub(r"[^a-zA-Z]", "", raw).capitalize()
         valid = {"Kewajiban", "Kebutuhan", "Tujuan", "Keinginan"}
-        return cleaned if cleaned in valid else "Tidak Terkategori"
+
+        if cleaned in valid:
+            print(f"📥 RESPON GROQ: {raw} -> {cleaned}")
+            return cleaned
+        else:
+            raise ValueError(f"Groq output invalid: {raw}")
+
     except Exception as e:
-        print("❌ ERROR Groq:", e)
-        return "Tidak Terkategori"
+        print("⚠️ ERROR Groq, pakai fallback keyword:", e)
+
+        # ===== FALLBACK KEYWORD CLASSIFIER =====
+        if any(k in text for k in ["cicilan", "kredit", "angsuran", "pinjaman", "utang", "bayar tagihan"]):
+            return "Kewajiban"
+        elif any(k in text for k in ["listrik", "air", "transport", "bensin", "bbm", "pulsa", "sewa", "rumah", "internet", "sembako"]):
+            return "Kebutuhan"
+        elif any(k in text for k in ["tabung", "invest", "deposito", "emas", "reksa", "tujuan", "rencana", "saving"]):
+            return "Tujuan"
+        elif any(k in text for k in ["makan", "resto", "kfc", "mcd", "kopi", "cafe", "nongkrong", "netflix",
+                                    "hiburan", "baju", "sepatu", "shop", "belanja", "jalan", "liburan", "game"]):
+            return "Keinginan"
+        else:
+            return "Tidak Terkategori"
 
 # =========================
 # ANALYZE EXCEL
@@ -61,11 +83,13 @@ Kategori:
 def analyze_transactions(df: pd.DataFrame) -> pd.DataFrame:
     df = df.rename(columns=str.lower)
 
+    # tanggal
     if 'tanggal' in df.columns:
         df['tanggal'] = pd.to_datetime(df['tanggal'], errors='coerce')
     else:
         df['tanggal'] = pd.NaT
 
+    # normalisasi jumlah
     if "jumlah" in df.columns:
         df["jumlah"] = pd.to_numeric(df["jumlah"], errors="coerce").fillna(0)
     elif "debit" in df.columns and "kredit" in df.columns:
@@ -79,6 +103,7 @@ def analyze_transactions(df: pd.DataFrame) -> pd.DataFrame:
     if transaksi_col not in df.columns:
         df[transaksi_col] = ""
 
+    # klasifikasi
     df["kategori"] = df[transaksi_col].apply(classify_transaction_groq)
     return df[["tanggal", transaksi_col, "jumlah", "kategori"]]
 
@@ -173,9 +198,9 @@ if uploaded_file:
     st.dataframe(df_analyzed)
 
     st.subheader("📈 Alokasi Pengeluaran (Donut Chart)")
-    st.plotly_chart(generate_donut_chart(df_analyzed), use_container_width=True)
+    st.plotly_chart(generate_donut_chart(df_analyzed), width="stretch")
 
-        # =========================
+    # =========================
     # RASIO + MINI CHART + SARAN PER RASIO
     # =========================
     st.markdown("### 📊 Rasio Keuangan Interaktif (Dengan Penjelasan)")
@@ -183,7 +208,6 @@ if uploaded_file:
     kategori_list = ["Kewajiban", "Kebutuhan", "Tujuan", "Keinginan"]
     total = df_analyzed["jumlah"].abs().sum()
 
-    # hitung nominal & rasio per kategori
     nilai = {}
     rasio = {}
     for k in kategori_list:
@@ -191,18 +215,13 @@ if uploaded_file:
         nilai[k] = amt
         rasio[k] = (amt / total * 100) if total else 0
 
-    # tampilkan rasio + mini chart + saran per kategori
     for i, k in enumerate(kategori_list):
         pct = rasio[k]
         amt = nilai[k]
 
         with st.expander(f"📌 {k} — {pct:.2f}%"):
-            # Rumus & hasil
-            st.write(
-                f"**{k} / Total** = Rp{amt:,.0f} / Rp{total:,.0f} = **{pct:.2f}%**"
-            )
+            st.write(f"**{k} / Total** = Rp{amt:,.0f} / Rp{total:,.0f} = **{pct:.2f}%**")
 
-            # Mini bar chart
             fig_ratio, ax_ratio = plt.subplots(figsize=(5, 0.6))
             ax_ratio.barh([""], [pct], color=sns.color_palette("husl", 8)[i])
             ax_ratio.set_xlim(0, 100)
@@ -210,7 +229,6 @@ if uploaded_file:
             ax_ratio.axis("off")
             st.pyplot(fig_ratio)
 
-            # Penjelasan & saran spesifik per kategori
             if k == "Kewajiban":
                 st.info(
                     "📌 **Makna:** menunjukkan seberapa besar beban cicilan/utang terhadap total arus uang.\n\n"
@@ -218,7 +236,6 @@ if uploaded_file:
                     + ("⚠️ Saat ini cukup tinggi, pertimbangkan restruktur cicilan/kurangi utang baru."
                        if pct > 30 else "Bagus, beban kewajiban masih sehat.")
                 )
-
             elif k == "Kebutuhan":
                 st.info(
                     "📌 **Makna:** menggambarkan kebutuhan rutin (sembako, listrik, transport, dsb).\n\n"
@@ -226,7 +243,6 @@ if uploaded_file:
                     + ("⚠️ Terlalu tinggi, coba efisiensi pos rutin."
                        if pct > 50 else "Sudah cukup ideal.")
                 )
-
             elif k == "Tujuan":
                 st.info(
                     "📌 **Makna:** porsi untuk tabungan/investasi/tujuan finansial.\n\n"
@@ -234,7 +250,6 @@ if uploaded_file:
                     + ("⚠️ Masih terlalu kecil, tingkatkan alokasi menabung/investasi."
                        if pct < 10 else "Bagus, kamu konsisten ke tujuan finansial.")
                 )
-
             elif k == "Keinginan":
                 st.info(
                     "📌 **Makna:** pengeluaran gaya hidup/hiburan.\n\n"
@@ -243,12 +258,13 @@ if uploaded_file:
                        if pct > 40 else "Masih aman dan terkendali.")
                 )
 
-    # Ringkasan cepat rasio (tetap seperti awal)
     st.markdown("#### 📌 Ringkasan Rasio")
     ratios_dict = {f"{k}/Total": f"{rasio[k]:.2f}%" for k in kategori_list}
     st.json(ratios_dict)
 
-
+    # =========================
+    # GRAFIK TREN BULANAN
+    # =========================
     st.subheader("📊 Grafik Tren Pengeluaran Bulanan")
     if 'tanggal' in df_analyzed.columns and not df_analyzed['tanggal'].isna().all():
         df_analyzed['bulan'] = df_analyzed['tanggal'].dt.to_period('M').astype(str)
@@ -257,5 +273,20 @@ if uploaded_file:
         st.line_chart(pivot_df)
     else:
         st.warning("📅 Kolom 'Tanggal' tidak tersedia atau tidak valid, grafik tren tidak ditampilkan.")
+
+    # =========================
+    # EXPORT
+    # =========================
+    st.subheader("📄 Ekspor Laporan")
+    ratios = generate_ratios(df_analyzed)
+    if st.button("🔽 Generate Laporan HTML"):
+        html_report = export_report_as_html(df_analyzed, ratios)
+        st.download_button(
+            "📥 Unduh Laporan HTML",
+            data=html_report,
+            file_name="laporan_keuangan.html",
+            mime="text/html"
+        )
+
 else:
     st.info("Silakan unggah file Excel terlebih dahulu.")
