@@ -9,29 +9,35 @@ import os
 openai.api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
 openai.api_base = "https://api.groq.com/openai/v1"
 
-# === FUNGSI AI KLASIFIKASI ===
 def classify_transaction_groq(text):
     prompt = f"""
-Klasifikasikan transaksi ini ke salah satu kategori:
+Tugas kamu adalah mengklasifikasikan transaksi berikut ke dalam salah satu dari 4 kategori:
 - Kewajiban
 - Kebutuhan
 - Tujuan
 - Keinginan
 
-Transaksi: "{text}"
+Berikan hanya 1 kata jawaban, tanpa penjelasan.
 
-Jawaban (hanya satu kategori):"""
+Transaksi: "{text}"
+Kategori:
+"""
     try:
         response = openai.ChatCompletion.create(
             model="mixtral-8x7b-32768",
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
-            max_tokens=10
+            max_tokens=5
         )
-        return response.choices[0].message.content.strip()
+        kategori = response.choices[0].message.content.strip().capitalize()
+        if kategori in ['Kewajiban', 'Kebutuhan', 'Tujuan', 'Keinginan']:
+            return kategori
+        else:
+            return "Tidak Terkategori"
     except Exception as e:
         print("❌ Error Groq:", e)
         return "Tidak Terkategori"
+
 
 # === ANALISA EXCEL ===
 def analyze_transactions(df):
