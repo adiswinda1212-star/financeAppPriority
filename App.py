@@ -58,11 +58,21 @@ Kategori:
             temperature=0,
             max_tokens=5
         )
+
         raw = resp.choices[0].message.content.strip()
         cleaned = re.sub(r"[^a-zA-Z]", "", raw).capitalize()
+
+        # Debug print (akan terlihat di terminal/log streamlit)
+        print("📝 PROMPT:", prompt)
+        print("📥 RESPON GROQ:", raw)
+        print("✅ KATEGORI DIBERSIHKAN:", cleaned)
+
         valid = {"Kewajiban", "Kebutuhan", "Tujuan", "Keinginan"}
         return cleaned if cleaned in valid else "Tidak Terkategori"
+
     except Exception as e:
+        # Akan muncul di log dan layar UI
+        st.warning(f"❌ Gagal klasifikasi Groq: {e}")
         print("❌ ERROR Groq:", e)
         return "Tidak Terkategori"
 
