@@ -114,19 +114,19 @@ def generate_ratios(df: pd.DataFrame):
 
 # Fungsi untuk membuat laporan HTML sederhana
 def generate_report(df, summary):
-total = summary['Jumlah'].sum()
-report_html = f"""
-<h2>Laporan Keuangan Pribadi</h2>
-<p>Total Pengeluaran: <strong>Rp{total:,.0f}</strong></p>
-<h3>Rincian:</h3>
-<ul>
-{''.join([f'<li>{row.Kategori}: Rp{row.Jumlah:,.0f}</li>' for _, row in summary.iterrows()])}
-</ul>
-<br><br>
-<p><em>Generated with FinanceAppPriority</em></p>
-"""
-return report_html
-
+    total = summary['Jumlah'].sum()
+    report_html = f"""
+    <h2>Laporan Keuangan Pribadi</h2>
+    <p>Total Pengeluaran: <strong>Rp{total:,.0f}</strong></p>
+    <h3>Rincian:</h3>
+    <ul>
+    {''.join([f'<li>{row.Kategori}: Rp{row.Jumlah:,.0f}</li>' for _, row in summary.iterrows()])}
+    </ul>
+    <br><br>
+    <p><em>Generated with FinanceAppPriority</em></p>
+    """
+    return report_html
+    
 # UI Streamlit
 st.title("📊 FinanceApp Priority")
 
