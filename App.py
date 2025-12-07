@@ -6,37 +6,35 @@ from jinja2 import Template
 import os
 
 # === SETUP API ===
-openai.api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
+openai.api_key = st.secrets.get("GROQ_API_KEY")
 openai.api_base = "https://api.groq.com/openai/v1"
+
 
 def classify_transaction_groq(text):
     prompt = f"""
-Tugas kamu adalah mengklasifikasikan transaksi berikut ke dalam salah satu dari 4 kategori:
-- Kewajiban
-- Kebutuhan
-- Tujuan
-- Keinginan
+Klasifikasikan transaksi berikut ke salah satu kategori berikut ini: Kewajiban, Kebutuhan, Tujuan, Keinginan.
 
-Berikan hanya 1 kata jawaban, tanpa penjelasan.
+Jawaban hanya 1 kata.
 
 Transaksi: "{text}"
-Kategori:
+Jawaban:
 """
     try:
         response = openai.ChatCompletion.create(
             model="mixtral-8x7b-32768",
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
-            max_tokens=5
+            max_tokens=10
         )
-        kategori = response.choices[0].message.content.strip().capitalize()
-        if kategori in ['Kewajiban', 'Kebutuhan', 'Tujuan', 'Keinginan']:
-            return kategori
-        else:
-            return "Tidak Terkategori"
-    except Exception as e:
-        print("❌ Error Groq:", e)
+        result = response.choices[0].message.content.strip()
+        print(f"🔍 Transaksi: {text} → AI: {result}")
+        if result.lower() in ['kewajiban', 'kebutuhan', 'tujuan', 'keinginan']:
+            return result.capitalize()
         return "Tidak Terkategori"
+    except Exception as e:
+        print("❌ ERROR Groq:", e)
+        return "Tidak Terkategori"
+
 
 
 # === ANALISA EXCEL ===
