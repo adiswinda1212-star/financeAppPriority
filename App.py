@@ -58,7 +58,11 @@ Kategori:
 # =========================
 def analyze_transactions(df: pd.DataFrame) -> pd.DataFrame:
     df = df.rename(columns=str.lower)
-    df['tanggal'] = pd.to_datetime(df['tanggal'], errors='coerce')
+
+    if 'tanggal' in df.columns:
+        df['tanggal'] = pd.to_datetime(df['tanggal'], errors='coerce')
+    else:
+        df['tanggal'] = pd.NaT  # fallback if no date column
 
     if "jumlah" in df.columns:
         df["jumlah"] = pd.to_numeric(df["jumlah"], errors="coerce").fillna(0)
@@ -185,9 +189,12 @@ if uploaded_file:
 
     # Tambahan: Grafik Tren Bulanan
     st.subheader("📊 Grafik Tren Pengeluaran Bulanan")
-    df_analyzed['bulan'] = df_analyzed['tanggal'].dt.to_period('M').astype(str)
-    monthly = df_analyzed.groupby(['bulan', 'kategori'])['jumlah'].sum().reset_index()
-    pivot_df = monthly.pivot(index='bulan', columns='kategori', values='jumlah').fillna(0)
-    st.line_chart(pivot_df)
+    if 'tanggal' in df_analyzed.columns and not df_analyzed['tanggal'].isna().all():
+        df_analyzed['bulan'] = df_analyzed['tanggal'].dt.to_period('M').astype(str)
+        monthly = df_analyzed.groupby(['bulan', 'kategori'])['jumlah'].sum().reset_index()
+        pivot_df = monthly.pivot(index='bulan', columns='kategori', values='jumlah').fillna(0)
+        st.line_chart(pivot_df)
+    else:
+        st.warning("📅 Kolom 'Tanggal' tidak tersedia atau tidak valid, grafik tren tidak ditampilkan.")
 else:
     st.info("Silakan unggah file Excel terlebih dahulu.")
