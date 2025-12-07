@@ -7,14 +7,25 @@ import os
 import re
 import matplotlib.pyplot as plt
 import seaborn as sns
+from io import BytesIO
+
+# =========================
+# OPTIONAL: WEASYPRINT PDF
+# =========================
+WEASYPRINT_AVAILABLE = True
+try:
+    from weasyprint import HTML
+except Exception:
+    WEASYPRINT_AVAILABLE = False
+
 
 # =========================
 # SETUP GROQ CLIENT
 # =========================
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
 client = Groq(api_key=GROQ_API_KEY)
-
 GROQ_MODEL = "llama-3.3-70b-versatile"
+
 
 # =========================
 # AI CLASSIFIER (GROQ)
@@ -55,17 +66,20 @@ Kategori:
         print("❌ ERROR Groq:", e)
         return "Tidak Terkategori"
 
+
 # =========================
 # ANALYZE EXCEL
 # =========================
 def analyze_transactions(df: pd.DataFrame) -> pd.DataFrame:
     df = df.rename(columns=str.lower)
 
-    if 'tanggal' in df.columns:
-        df['tanggal'] = pd.to_datetime(df['tanggal'], errors='coerce')
+    # parsing tanggal
+    if "tanggal" in df.columns:
+        df["tanggal"] = pd.to_datetime(df["tanggal"], errors="coerce")
     else:
-        df['tanggal'] = pd.NaT
+        df["tanggal"] = pd.NaT
 
+    # normalisasi jumlah
     if "jumlah" in df.columns:
         df["jumlah"] = pd.to_numeric(df["jumlah"], errors="coerce").fillna(0)
     elif "debit" in df.columns and "kredit" in df.columns:
@@ -82,6 +96,7 @@ def analyze_transactions(df: pd.DataFrame) -> pd.DataFrame:
     df["kategori"] = df[transaksi_col].apply(classify_transaction_groq)
     return df[["tanggal", transaksi_col, "jumlah", "kategori"]]
 
+
 # =========================
 # VISUALIZATION
 # =========================
@@ -96,6 +111,7 @@ def generate_donut_chart(df: pd.DataFrame):
     )
     return fig
 
+
 def generate_ratios(df: pd.DataFrame):
     total = df["jumlah"].abs().sum()
     ratios = {}
@@ -103,6 +119,7 @@ def generate_ratios(df: pd.DataFrame):
         amount = df[df["kategori"] == k]["jumlah"].abs().sum()
         ratios[f"{k}/Total"] = f"{(amount/total*100):.2f}%" if total else "0%"
     return ratios
+
 
 # =========================
 # EXPORT HTML REPORT
@@ -128,6 +145,7 @@ def export_report_as_html(df, ratios):
                 <li><strong>{{ key }}</strong>: {{ value }}</li>
             {% endfor %}
         </ul>
+
         <h2>📄 Transaksi Terklasifikasi</h2>
         <table>
             <thead>
@@ -152,6 +170,17 @@ def export_report_as_html(df, ratios):
     """
     return Template(html_template).render(df=df, ratios=ratios)
 
+
+# =========================
+# EXPORT PDF (HTML -> PDF)
+# =========================
+def export_pdf_from_html(html_content: str) -> bytes:
+    """Return PDF bytes from HTML string."""
+    pdf_io = BytesIO()
+    HTML(string=html_content).write_pdf(pdf_io)
+    return pdf_io.getvalue()
+
+
 # =========================
 # STREAMLIT UI
 # =========================
@@ -175,6 +204,9 @@ if uploaded_file:
     st.subheader("📈 Alokasi Pengeluaran (Donut Chart)")
     st.plotly_chart(generate_donut_chart(df_analyzed), use_container_width=True)
 
+    # =========================
+    # RASIO + MINI CHART + SARAN PER RASIO
+    # =========================
     st.markdown("### 📊 Rasio Keuangan Interaktif (Dengan Penjelasan)")
 
     kategori_list = ["Kewajiban", "Kebutuhan", "Tujuan", "Keinginan"]
@@ -195,6 +227,7 @@ if uploaded_file:
             st.write(
                 f"**{k} / Total** = Rp{amt:,.0f} / Rp{total:,.0f} = **{pct:.2f}%**"
             )
+
             fig_ratio, ax_ratio = plt.subplots(figsize=(5, 0.6))
             ax_ratio.barh([""], [pct], color=sns.color_palette("husl", 8)[i])
             ax_ratio.set_xlim(0, 100)
@@ -203,18 +236,77 @@ if uploaded_file:
             st.pyplot(fig_ratio)
 
             if k == "Kewajiban":
-                st.info("📌 **Makna:** seberapa besar beban cicilan/utang terhadap arus uang.\n\n✅ Idealnya <30%. " + ("⚠️ Terlalu tinggi." if pct > 30 else "✅ Masih sehat."))
+                st.info(
+                    "📌 **Makna:** beban cicilan/utang terhadap total arus uang.\n\n"
+                    "✅ **Saran:** idealnya < **30%**. "
+                    + ("⚠️ Cukup tinggi, pertimbangkan kurangi utang baru/restruktur cicilan."
+                       if pct > 30 else "Bagus, beban kewajiban masih sehat.")
+                )
+
             elif k == "Kebutuhan":
-                st.info("📌 **Makna:** kebutuhan pokok rutin.\n\n✅ Ideal 40–50%. " + ("⚠️ Terlalu tinggi." if pct > 50 else "✅ Ideal."))
+                st.info(
+                    "📌 **Makna:** kebutuhan rutin (sembako, listrik, transport, dsb).\n\n"
+                    "✅ **Saran:** idealnya **40–50%**. "
+                    + ("⚠️ Terlalu tinggi, coba efisiensi pos rutin."
+                       if pct > 50 else "Sudah cukup ideal.")
+                )
+
             elif k == "Tujuan":
-                st.info("📌 **Makna:** tabungan/investasi masa depan.\n\n✅ Ideal >10–20%. " + ("⚠️ Terlalu kecil." if pct < 10 else "✅ Konsisten."))
+                st.info(
+                    "📌 **Makna:** porsi tabungan/investasi/tujuan finansial.\n\n"
+                    "✅ **Saran:** idealnya > **10–20%**. "
+                    + ("⚠️ Masih kecil, tingkatkan alokasi menabung/investasi."
+                       if pct < 10 else "Bagus, kamu konsisten ke tujuan finansial.")
+                )
+
             elif k == "Keinginan":
-                st.info("📌 **Makna:** gaya hidup, hiburan.\n\n✅ Ideal <30–40%. " + ("⚠️ Terlalu besar." if pct > 40 else "✅ Aman."))
+                st.info(
+                    "📌 **Makna:** pengeluaran gaya hidup/hiburan.\n\n"
+                    "✅ **Saran:** idealnya < **30–40%**. "
+                    + ("⚠️ Terlalu besar, coba batasi lifestyle biar Tujuan aman."
+                       if pct > 40 else "Masih aman dan terkendali.")
+                )
 
     st.markdown("#### 📌 Ringkasan Rasio")
     ratios_dict = {f"{k}/Total": f"{rasio[k]:.2f}%" for k in kategori_list}
     st.json(ratios_dict)
 
+    # =========================
+    # EXPORT REPORT (HTML + PDF)
+    # =========================
+    st.subheader("📄 Ekspor Laporan")
+
+    ratios = generate_ratios(df_analyzed)
+    html_report = export_report_as_html(df_analyzed, ratios)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.download_button(
+            "📥 Unduh Laporan HTML",
+            data=html_report,
+            file_name="laporan_keuangan.html",
+            mime="text/html"
+        )
+
+    with col2:
+        if WEASYPRINT_AVAILABLE:
+            try:
+                pdf_bytes = export_pdf_from_html(html_report)
+                st.download_button(
+                    "📥 Unduh Laporan PDF",
+                    data=pdf_bytes,
+                    file_name="laporan_keuangan.pdf",
+                    mime="application/pdf"
+                )
+            except Exception as e:
+                st.warning(f"PDF gagal dibuat di server: {e}\nSilakan unduh HTML lalu Ctrl+P → Save as PDF.")
+        else:
+            st.warning("WeasyPrint tidak tersedia di server ini. Unduh HTML lalu Ctrl+P → Save as PDF.")
+
+    # =========================
+    # Grafik Tren Bulanan
+    # =========================
     st.subheader("📊 Grafik Tren Pengeluaran Bulanan")
     if 'tanggal' in df_analyzed.columns and not df_analyzed['tanggal'].isna().all():
         df_analyzed['bulan'] = df_analyzed['tanggal'].dt.to_period('M').astype(str)
@@ -223,13 +315,6 @@ if uploaded_file:
         st.line_chart(pivot_df)
     else:
         st.warning("📅 Kolom 'Tanggal' tidak tersedia atau tidak valid, grafik tren tidak ditampilkan.")
-
-    st.subheader("📄 Ekspor Laporan")
-    if st.button("📥 Download HTML Laporan"):
-        html = export_report_as_html(df_analyzed, ratios_dict)
-        st.download_button("📄 Unduh Laporan HTML", html, file_name="laporan_keuangan.html")
-
-    st.warning("WeasyPrint tidak tersedia di server ini. Silakan unduh HTML lalu tekan **Ctrl+P → Save as PDF** di browser kamu.")
 
 else:
     st.info("Silakan unggah file Excel terlebih dahulu.")
