@@ -7,4 +7,5 @@ groq
 matplotlib
 seaborn
 weasyprint
+kaleido
 
