@@ -6,3 +6,4 @@ jinja2
 groq
 matplotlib
 seaborn
+weasyprint
