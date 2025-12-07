@@ -173,9 +173,20 @@ if uploaded_file:
     st.subheader("📈 Alokasi Pengeluaran (Donut Chart)")
     st.plotly_chart(generate_donut_chart(df_analyzed), use_container_width=True)
 
-    st.subheader("📊 Rasio Keuangan")
-    ratios = generate_ratios(df_analyzed)
-    st.json(ratios)
+    st.markdown("### 📊 Rasio Keuangan Interaktif")
+    total = summary['Jumlah'].sum()
+    for i, row in summary.iterrows():
+        kategori = row['Kategori']
+        nilai = row['Jumlah']
+        persentase = nilai / total * 100 if total else 0
+        
+        with st.expander(f"📌 {kategori} — {persentase:.2f}%"):
+            st.write(f"**{kategori} / Total** = {nilai:,.0f} / {total:,.0f} = **{persentase:.2f}%**")
+            fig_ratio, ax_ratio = plt.subplots(figsize=(4, 0.4))
+            ax_ratio.barh([""], [persentase], color=sns.color_palette("husl", 8)[i])
+            ax_ratio.set_xlim(0, 100)
+            ax_ratio.axis("off")
+            st.pyplot(fig_ratio)
 
     st.subheader("📄 Ekspor Laporan")
     if st.button("🔽 Generate Laporan HTML"):
