@@ -175,43 +175,79 @@ if uploaded_file:
     st.subheader("📈 Alokasi Pengeluaran (Donut Chart)")
     st.plotly_chart(generate_donut_chart(df_analyzed), use_container_width=True)
 
-    st.markdown("### 📊 Rasio Keuangan Interaktif")
+        # =========================
+    # RASIO + MINI CHART + SARAN PER RASIO
+    # =========================
+    st.markdown("### 📊 Rasio Keuangan Interaktif (Dengan Penjelasan)")
+
+    kategori_list = ["Kewajiban", "Kebutuhan", "Tujuan", "Keinginan"]
     total = df_analyzed["jumlah"].abs().sum()
-    for kategori in ["Kewajiban", "Kebutuhan", "Tujuan", "Keinginan"]:
-        jumlah = df_analyzed[df_analyzed["kategori"] == kategori]["jumlah"].abs().sum()
-        st.metric(label=f"{kategori}", value=f"Rp{jumlah:,.0f}")
 
-    # === SARAN AI OTOMATIS BERDASARKAN RASIO ===
-    st.markdown("### 💡 Saran AI Berdasarkan Rasio")
-    nilai = {
-        "Kewajiban": df_analyzed[df_analyzed["kategori"] == "Kewajiban"]["jumlah"].abs().sum(),
-        "Kebutuhan": df_analyzed[df_analyzed["kategori"] == "Kebutuhan"]["jumlah"].abs().sum(),
-        "Tujuan": df_analyzed[df_analyzed["kategori"] == "Tujuan"]["jumlah"].abs().sum(),
-        "Keinginan": df_analyzed[df_analyzed["kategori"] == "Keinginan"]["jumlah"].abs().sum(),
-    }
+    # hitung nominal & rasio per kategori
+    nilai = {}
+    rasio = {}
+    for k in kategori_list:
+        amt = df_analyzed[df_analyzed["kategori"] == k]["jumlah"].abs().sum()
+        nilai[k] = amt
+        rasio[k] = (amt / total * 100) if total else 0
 
-    if nilai["Keinginan"] / total > 0.4:
-        st.warning("⚠️ Pengeluaran untuk *Keinginan* lebih dari 40%. Pertimbangkan untuk menurunkannya agar tidak mengganggu kebutuhan utama.")
-    if nilai["Tujuan"] / total < 0.1:
-        st.info("💰 Alokasi ke *Tujuan* (seperti menabung/investasi) masih kecil. Coba tingkatkan untuk jangka panjang.")
-    if nilai["Kebutuhan"] / total > 0.5:
-        st.warning("📌 *Kebutuhan* mendominasi lebih dari 50%. Pastikan tetap ada ruang untuk Tujuan dan Keinginan.")
-    if nilai["Kewajiban"] / total > 0.3:
-        st.error("🚨 *Kewajiban* lebih dari 30%. Cek apakah utang atau cicilan terlalu membebani keuangan.")
+    # tampilkan rasio + mini chart + saran per kategori
+    for i, k in enumerate(kategori_list):
+        pct = rasio[k]
+        amt = nilai[k]
 
-    if all(0.1 < (v / total) < 0.4 for v in nilai.values()):
-        st.success("✅ Rasio keuangan kamu cukup seimbang. Pertahankan dan tetap disiplin!")
+        with st.expander(f"📌 {k} — {pct:.2f}%"):
+            # Rumus & hasil
+            st.write(
+                f"**{k} / Total** = Rp{amt:,.0f} / Rp{total:,.0f} = **{pct:.2f}%**"
+            )
 
-    st.subheader("📄 Ekspor Laporan")
-    if st.button("🔽 Generate Laporan HTML"):
-        ratios = generate_ratios(df_analyzed)
-        html_report = export_report_as_html(df_analyzed, ratios)
-        st.download_button(
-            "📥 Unduh Laporan HTML",
-            data=html_report,
-            file_name="laporan_keuangan.html",
-            mime="text/html"
-        )
+            # Mini bar chart
+            fig_ratio, ax_ratio = plt.subplots(figsize=(5, 0.6))
+            ax_ratio.barh([""], [pct], color=sns.color_palette("husl", 8)[i])
+            ax_ratio.set_xlim(0, 100)
+            ax_ratio.set_title(f"Proporsi {k}", fontsize=9)
+            ax_ratio.axis("off")
+            st.pyplot(fig_ratio)
+
+            # Penjelasan & saran spesifik per kategori
+            if k == "Kewajiban":
+                st.info(
+                    "📌 **Makna:** menunjukkan seberapa besar beban cicilan/utang terhadap total arus uang.\n\n"
+                    "✅ **Saran:** idealnya < **30%**. "
+                    + ("⚠️ Saat ini cukup tinggi, pertimbangkan restruktur cicilan/kurangi utang baru."
+                       if pct > 30 else "Bagus, beban kewajiban masih sehat.")
+                )
+
+            elif k == "Kebutuhan":
+                st.info(
+                    "📌 **Makna:** menggambarkan kebutuhan rutin (sembako, listrik, transport, dsb).\n\n"
+                    "✅ **Saran:** idealnya sekitar **40–50%**. "
+                    + ("⚠️ Terlalu tinggi, coba efisiensi pos rutin."
+                       if pct > 50 else "Sudah cukup ideal.")
+                )
+
+            elif k == "Tujuan":
+                st.info(
+                    "📌 **Makna:** porsi untuk tabungan/investasi/tujuan finansial.\n\n"
+                    "✅ **Saran:** idealnya > **10–20%**. "
+                    + ("⚠️ Masih terlalu kecil, tingkatkan alokasi menabung/investasi."
+                       if pct < 10 else "Bagus, kamu konsisten ke tujuan finansial.")
+                )
+
+            elif k == "Keinginan":
+                st.info(
+                    "📌 **Makna:** pengeluaran gaya hidup/hiburan.\n\n"
+                    "✅ **Saran:** idealnya < **30–40%**. "
+                    + ("⚠️ Terlalu besar, coba batasi lifestyle agar tujuan finansial aman."
+                       if pct > 40 else "Masih aman dan terkendali.")
+                )
+
+    # Ringkasan cepat rasio (tetap seperti awal)
+    st.markdown("#### 📌 Ringkasan Rasio")
+    ratios_dict = {f"{k}/Total": f"{rasio[k]:.2f}%" for k in kategori_list}
+    st.json(ratios_dict)
+
 
     st.subheader("📊 Grafik Tren Pengeluaran Bulanan")
     if 'tanggal' in df_analyzed.columns and not df_analyzed['tanggal'].isna().all():
