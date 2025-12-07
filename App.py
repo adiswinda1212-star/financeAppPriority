@@ -5,36 +5,41 @@ import plotly.express as px
 from jinja2 import Template
 import os
 
-# === SETUP API ===
-openai.api_key = st.secrets.get("GROQ_API_KEY")
-openai.api_base = "https://api.groq.com/openai/v1"
+from openai import OpenAI
 
+client = OpenAI(
+    api_key=st.secrets["GROQ_API_KEY"],
+    base_url="https://api.groq.com/openai/v1"
+)
 
 def classify_transaction_groq(text):
     prompt = f"""
-Klasifikasikan transaksi berikut ke salah satu kategori berikut ini: Kewajiban, Kebutuhan, Tujuan, Keinginan.
+Tugas kamu adalah mengklasifikasikan transaksi berikut ke salah satu dari 4 kategori:
+- Kewajiban
+- Kebutuhan
+- Tujuan
+- Keinginan
 
-Jawaban hanya 1 kata.
+Jawaban hanya satu kata saja.
 
 Transaksi: "{text}"
 Jawaban:
 """
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="mixtral-8x7b-32768",
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=10
         )
-        result = response.choices[0].message.content.strip()
-        print(f"🔍 Transaksi: {text} → AI: {result}")
-        if result.lower() in ['kewajiban', 'kebutuhan', 'tujuan', 'keinginan']:
-            return result.capitalize()
-        return "Tidak Terkategori"
+        result = response.choices[0].message.content.strip().capitalize()
+        if result in ['Kewajiban', 'Kebutuhan', 'Tujuan', 'Keinginan']:
+            return result
+        else:
+            return "Tidak Terkategori"
     except Exception as e:
         print("❌ ERROR Groq:", e)
         return "Tidak Terkategori"
-
 
 
 # === ANALISA EXCEL ===
