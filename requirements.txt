@@ -5,3 +5,4 @@ plotly
 jinja2
 python-dotenv
 openai
+openai>=1.1.1
